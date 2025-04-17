@@ -18,7 +18,7 @@ Clone the repo
 It's recommended to use the conda environment file included in this repository; these commands will create and activate a new `robot-mujoco-simulation` conda env.
 
     conda env create -f conda-environment.yaml
-    activate robot-mujoco-simulation
+    conda activate robot-mujoco-simulation
 
 
 ## Calculating LQR parameters
