@@ -2,17 +2,17 @@
 
 ## Overview
 
-This repository contains a MuJoCo-based simulation environment for a two-wheeled self-balancing robot.
+This repository contains the simulation and development environment for a two-wheeled self-balancing robot state estimation project.
 
-The current system uses a Linear–Quadratic Regulator (LQR) controller as a baseline controller. Based on this simulation, the main research goal is to develop and evaluate a hybrid state estimation framework that combines model-based filtering and learning-based error compensation.
+The project is based on a MuJoCo simulation of an inverted-pendulum-type balancing robot. The current robot is stabilized by a Linear-Quadratic Regulator (LQR) baseline controller, and this baseline is used to generate data and evaluate state estimation algorithms.
+
+The main research goal is to develop a hybrid state estimation framework that combines model-based filtering and learning-based error compensation.
 
 The long-term objective is to improve state and parameter estimation accuracy under model uncertainty, sensor bias, slip, slope, and external disturbances.
 
-## Research Goal
+## Research Topic
 
-The main research topic is:
-
-Hybrid EKF–Neural Network Approach for State and Parameter Estimation in Self-Balancing Robots under Model Uncertainty
+Hybrid EKF-Neural Network Approach for State and Parameter Estimation in Self-Balancing Robots under Model Uncertainty
 
 The project focuses on the following questions:
 
@@ -20,14 +20,90 @@ The project focuses on the following questions:
 2. Can the proposed estimator improve control performance under slip, slope, and disturbance conditions?
 3. Can learning-based parameter or error estimation improve the robustness of conventional sensor fusion algorithms?
 
+## Project Scope
+
+This repository is for the self-balancing robot state estimation project.
+
+It is intentionally separated from the drone/PX4/ROS2 project. Drone-related components such as PX4, Pixhawk, QGroundControl, MAVLink, Micro XRCE-DDS Agent, Crazyflie control, Gazebo drone landing, and ROS2 offboard mission nodes should be managed in a separate repository.
+
+This repository should focus on:
+
+- self-balancing robot simulation
+- MuJoCo physics simulation
+- Gazebo/ROS2-based robot modeling
+- sensor modeling
+- EKF-based state estimation
+- neural-network-based estimation error correction
+- dataset collection for state estimation
+
 ## Current Features
 
 - MuJoCo simulation of a two-wheeled self-balancing robot
-- LQR-based balance controller
-- GUI-based manual control using PySide6
-- Headless simulation support for dataset collection
-- Dataset generation for estimator training
-- Baseline logs for pitch, velocity, wheel speed, motor command, and robot state
+- LQR-based baseline balance controller
+- MuJoCo XML robot model and scene definition
+- Headless MuJoCo physics execution
+- Docker-based development environment
+- Python virtual environment inside Docker
+- ROS2 Humble and Gazebo-related packages
+- NumPy, SciPy, MuJoCo, PySide6, and Gymnasium-based Python stack
+
+## Verified Environment Status
+
+The Docker environment has been verified for headless MuJoCo execution.
+
+The following checks are currently working inside the Docker container:
+
+```bash
+python - <<'PY'
+import numpy
+import scipy
+import mujoco
+from scipy.spatial.transform import Rotation
+
+print("numpy:", numpy.__version__, numpy.__file__)
+print("scipy:", scipy.__version__, scipy.__file__)
+print("mujoco:", mujoco.__version__)
+print("imports OK")
+PY
+```
+
+The MuJoCo model loading and physics stepping have also been verified:
+
+```bash
+python - <<'PY'
+import mujoco
+
+model = mujoco.MjModel.from_xml_path("src/simulation/scene.xml")
+data = mujoco.MjData(model)
+
+for _ in range(1000):
+    mujoco.mj_step(model, data)
+
+print("MuJoCo physics OK")
+print("time:", data.time)
+PY
+```
+
+Expected output:
+
+```text
+MuJoCo physics OK
+time: 0.02500000000000046
+```
+
+The simulation timestep is defined in `src/simulation/scene.xml`.
+
+## Known Issue: GUI Rendering
+
+The GUI simulation script may cause a segmentation fault in some Docker + WSLg + Qt/OpenGL environments:
+
+```bash
+python src/simulation/simulate_robot.py
+```
+
+This issue is related to GUI rendering, not MuJoCo physics itself.
+
+For research and dataset collection, headless MuJoCo scripts should be prioritized. GUI rendering can be treated as a separate development issue.
 
 ## Planned Features
 
@@ -35,17 +111,114 @@ The project focuses on the following questions:
 - IMU and encoder sensor modeling
 - MLP-based EKF error compensation
 - Slip, slope, and disturbance simulation
-- Comparison between ground truth, EKF-only estimation, and EKF + neural network correction
+- Dataset collection under model uncertainty
+- Comparison between:
+  - MuJoCo ground truth
+  - raw sensor measurements
+  - EKF-only estimation
+  - EKF + neural network correction
+- Gazebo/ROS2 self-balancing robot model
+- ROS2 nodes for simulated sensor publishing and estimator testing
 
-## Repository Scope
+## Repository Structure
 
-This repository is for the self-balancing robot state estimation project.
+```text
+.
+├── compose.yaml
+├── Dockerfile
+├── docker/
+│   └── Dockerfile.gazebo
+├── requirements.txt
+├── src/
+│   └── simulation/
+│       ├── scene.xml
+│       ├── robot-02.xml
+│       ├── robot_lqr.py
+│       ├── simulate_robot.py
+│       └── manual_actuator_gui.py
+├── scripts/
+├── datasets/
+├── docs/
+├── logs/
+├── README.md
+└── LICENSE
+```
 
-It is separate from the drone/PX4/ROS2 project. Drone-related code such as PX4 offboard control, Gazebo drone landing, Crazyflie control, and ROS2 mission nodes should be managed in a separate repository.
+## Docker Development Environment
 
-## Running the Simulation
+This project uses a Docker environment that excludes drone/PX4-specific dependencies.
 
-Run the GUI simulation:
+The Docker environment includes:
+
+- ROS2 Humble
+- Gazebo/ROS integration packages
+- MuJoCo
+- Python virtual environment
+- NumPy / SciPy
+- PySide6
+- Gymnasium
+- common development tools
+
+It does not include:
+
+- PX4-Autopilot
+- Pixhawk setup
+- QGroundControl
+- MAVLink router
+- Micro XRCE-DDS Agent
+- px4_msgs
+- px4_ros_com
+- drone SITL launch files
+
+## Running with Docker
+
+Build the Docker image:
+
+```bash
+docker compose build
+```
+
+Run the development container:
+
+```bash
+docker compose run --rm state-estimation
+```
+
+Inside the container, test the Python environment:
+
+```bash
+python - <<'PY'
+import numpy
+import scipy
+import mujoco
+
+print("numpy:", numpy.__version__)
+print("scipy:", scipy.__version__)
+print("mujoco:", mujoco.__version__)
+print("environment OK")
+PY
+```
+
+Run a headless MuJoCo physics check:
+
+```bash
+python - <<'PY'
+import mujoco
+
+model = mujoco.MjModel.from_xml_path("src/simulation/scene.xml")
+data = mujoco.MjData(model)
+
+for _ in range(1000):
+    mujoco.mj_step(model, data)
+
+print("MuJoCo physics OK")
+print("time:", data.time)
+PY
+```
+
+## Running the Existing GUI Scripts
+
+Run the original GUI simulation:
 
 ```bash
 python src/simulation/simulate_robot.py
@@ -56,6 +229,32 @@ Run the manual actuator GUI:
 ```bash
 python src/simulation/manual_actuator_gui.py
 ```
+
+If these scripts fail with a segmentation fault inside Docker, use headless scripts instead. The GUI issue is separate from the validity of the MuJoCo physics simulation.
+
+## Dataset Policy
+
+Generated datasets and logs should not be committed directly to Git if they are large.
+
+Recommended policy:
+
+- Keep dataset format descriptions in `datasets/README.md`
+- Keep large `.csv`, `.npz`, `.npy`, log, model, and checkpoint files outside Git
+- Commit only small sample datasets when needed
+- Use external storage or Git LFS later if large datasets must be versioned
+
+## Recommended Development Roadmap
+
+1. Stabilize the Docker environment
+2. Add a headless MuJoCo smoke test script
+3. Add LQR-based headless simulation and logging
+4. Generate baseline datasets from MuJoCo ground truth
+5. Add simulated IMU and encoder measurements
+6. Implement EKF-only state estimation
+7. Train an MLP to estimate EKF residual/error
+8. Compare ground truth, EKF-only, and EKF + MLP results
+9. Extend the environment to slip, slope, and disturbance cases
+10. Build a Gazebo/ROS2 version of the self-balancing robot model
 
 ## Acknowledgements
 
