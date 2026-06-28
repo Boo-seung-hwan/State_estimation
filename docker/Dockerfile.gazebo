@@ -1,0 +1,54 @@
+FROM ros:humble-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=humble
+ENV MUJOCO_GL=osmesa
+ENV PYTHONUNBUFFERED=1
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    nano \
+    vim \
+    build-essential \
+    cmake \
+    python3-pip \
+    python3-venv \
+    python-is-python3 \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-vcstool \
+    python3-opencv \
+    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libosmesa6-dev \
+    libglfw3 \
+    libglew-dev \
+    libxkbcommon-x11-0 \
+    libxcb-xinerama0 \
+    libxcb-cursor0 \
+    ros-humble-ros-gz \
+    ros-humble-xacro \
+    ros-humble-joint-state-publisher \
+    ros-humble-robot-state-publisher \
+    ros-humble-rviz2 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv --system-site-packages /opt/venv
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+WORKDIR /workspace/State_estimation
+
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+RUN echo "source /opt/venv/bin/activate" >> /root/.bashrc
+
+CMD ["/bin/bash"]

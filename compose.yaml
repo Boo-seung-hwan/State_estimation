@@ -1,0 +1,21 @@
+services:
+  state-estimation:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gazebo
+    image: state-estimation:gazebo
+    container_name: state-estimation-dev
+    working_dir: /workspace/State_estimation
+    volumes:
+      - .:/workspace/State_estimation
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+      - QT_QPA_PLATFORM=xcb
+      - QT_X11_NO_MITSHM=1
+      - MUJOCO_GL=osmesa
+    stdin_open: true
+    tty: true
