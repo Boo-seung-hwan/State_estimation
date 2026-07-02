@@ -190,3 +190,6 @@ datasets/*.npy
 
 # Windows alternate data stream artifacts
 *:Zone.Identifier
+
+# External/reference simulation folder
+self_balancing_robot_sim/
