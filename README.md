@@ -284,3 +284,267 @@ Current priority:
 4. Train MLP residual estimator.
 5. Add slip, slope, and disturbance conditions.
 6. Compare EKF-only and EKF–MLP hybrid estimation.
+
+---
+
+## ROS 2 / Gazebo Simulation Scaffold
+
+This repository includes an initial ROS 2 Humble + Ignition Gazebo Fortress scaffold for developing a Gazebo-based self-balancing robot simulation.
+
+The current Gazebo setup is intended as a starting point for team members who will develop:
+
+- Gazebo world files
+- SDF robot models
+- sensor configurations
+- future ROS 2 bridges
+- future controllers and state estimation nodes
+
+At this stage, the Gazebo simulation is not yet a full control or state estimation environment. It is a working scaffold for world/model development.
+
+### Current Status
+
+The following items have been verified:
+
+- Docker-based ROS 2 Humble environment builds successfully.
+- The ROS 2 workspace under `ros2_ws/` builds with `colcon`.
+- `empty_world.sdf` can be launched in Ignition Gazebo.
+- A minimal two-wheeled self-balancing robot model can be spawned.
+- The robot model contains:
+  - `base_link`
+  - `left_wheel`
+  - `right_wheel`
+  - `left_wheel_joint`
+  - `right_wheel_joint`
+  - `imu_sensor`
+- Gazebo-native IMU and joint state topics are published.
+
+Confirmed Gazebo-native topics include:
+
+```text
+/imu
+/world/empty_world/model/balance_robot/joint_state
+```
+
+Note that these are Gazebo / Ignition topics. They do not automatically appear in `ros2 topic list` until a `ros_gz_bridge` node is added.
+
+### Package Structure
+
+```text
+ros2_ws/
+└── src/
+    ├── balance_robot_description/
+    │   ├── models/
+    │   │   └── balance_robot/
+    │   │       ├── model.config
+    │   │       └── model.sdf
+    │   ├── meshes/
+    │   ├── urdf/
+    │   └── rviz/
+    │
+    ├── balance_robot_gazebo/
+    │   ├── worlds/
+    │   │   └── empty_world.sdf
+    │   ├── launch/
+    │   │   └── gazebo_balance.launch.py
+    │   └── config/
+    │
+    └── balance_robot_bringup/
+        ├── launch/
+        └── config/
+```
+
+Package roles:
+
+| Package | Role |
+|---|---|
+| `balance_robot_description` | Robot model, SDF files, meshes, URDF/RViz resources |
+| `balance_robot_gazebo` | Gazebo worlds and Gazebo launch files |
+| `balance_robot_bringup` | Future integrated launch/config package for bridges, controllers, and estimators |
+
+### Build Instructions
+
+Start the Docker container from the repository root:
+
+```bash
+cd ~/state_estimation/balance-robot-mujoco-sim
+
+docker compose up -d state-estimation
+docker exec -it state-estimation-dev bash
+```
+
+Inside the container:
+
+```bash
+cd /workspace/State_estimation/ros2_ws
+
+source /opt/ros/humble/setup.bash
+source /opt/venv/bin/activate
+
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Check that the packages are visible:
+
+```bash
+ros2 pkg list | grep balance_robot
+```
+
+Expected output:
+
+```text
+balance_robot_bringup
+balance_robot_description
+balance_robot_gazebo
+```
+
+### Launch Gazebo
+
+Inside the container:
+
+```bash
+cd /workspace/State_estimation/ros2_ws
+
+source /opt/ros/humble/setup.bash
+source /opt/venv/bin/activate
+source install/setup.bash
+
+ros2 launch balance_robot_gazebo gazebo_balance.launch.py
+```
+
+This launches `empty_world.sdf` and spawns the minimal `balance_robot` SDF model.
+
+### Check Gazebo Models and Topics
+
+Open another terminal and enter the running container:
+
+```bash
+cd ~/state_estimation/balance-robot-mujoco-sim
+docker exec -it state-estimation-dev bash
+```
+
+Inside the container:
+
+```bash
+cd /workspace/State_estimation/ros2_ws
+
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+```
+
+List Gazebo models:
+
+```bash
+ign model --list
+```
+
+Expected models:
+
+```text
+ground_plane
+balance_robot
+```
+
+Check robot joints:
+
+```bash
+ign model -m balance_robot -j
+```
+
+Expected joints:
+
+```text
+left_wheel_joint
+right_wheel_joint
+```
+
+Check Gazebo-native topics:
+
+```bash
+ign topic -l
+```
+
+Useful filter:
+
+```bash
+ign topic -l | grep -E "imu|joint|balance_robot"
+```
+
+Expected relevant topics:
+
+```text
+/imu
+/world/empty_world/model/balance_robot/joint_state
+```
+
+### Important Note: `ign` vs `gz`
+
+This Docker environment currently uses Ignition Gazebo Fortress.
+
+Use:
+
+```bash
+ign topic -l
+ign model --list
+ign gazebo --versions
+```
+
+Do not use:
+
+```bash
+gz topic -l
+```
+
+because the `gz` command may not be available in this environment.
+
+### Current Limitations
+
+The following features are not implemented yet:
+
+- ROS 2 bridge for Gazebo IMU topic
+- ROS 2 bridge for Gazebo joint state topic
+- wheel velocity controller
+- Gazebo-based LQR controller
+- EKF state estimator integration
+- MLP residual correction integration
+- realistic slope world
+- low-friction / slip world
+- external disturbance scenario
+
+The current Gazebo setup should be treated as a world/model development scaffold, not yet as a finished control simulation.
+
+### Development Rules for Team Members
+
+World files should be added under:
+
+```text
+ros2_ws/src/balance_robot_gazebo/worlds/
+```
+
+Robot SDF files should be added or modified under:
+
+```text
+ros2_ws/src/balance_robot_description/models/
+```
+
+Mesh files should be stored under:
+
+```text
+ros2_ws/src/balance_robot_description/meshes/
+```
+
+Please keep the following names stable whenever possible:
+
+```text
+base_link
+left_wheel
+right_wheel
+left_wheel_joint
+right_wheel_joint
+imu_sensor
+```
+
+These names will be used later by controller, bridge, EKF, and dataset collection nodes.
+
+Do not modify the existing MuJoCo simulation files unless the change is directly related to MuJoCo.
+
