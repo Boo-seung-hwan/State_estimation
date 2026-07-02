@@ -202,3 +202,7 @@ ros2_ws/log/
 # Gazebo local files
 .gazebo/
 .gz/
+
+# Keep Gazebo robot models tracked
+!ros2_ws/src/balance_robot_description/models/
+!ros2_ws/src/balance_robot_description/models/**
