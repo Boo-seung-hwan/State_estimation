@@ -263,3 +263,24 @@ The original MuJoCo self-balancing robot simulation structure was based on the o
 https://github.com/lachlanhurst/balance-robot-mujoco-sim
 
 This repository modifies and extends the original simulation for a POSTECH undergraduate research project on hybrid state estimation for self-balancing robots.
+
+## Current Research Progress
+
+The current development stage is baseline data generation.
+
+Implemented scripts:
+
+- `scripts/run_headless_lqr.py`: runs the LQR-controlled robot without GUI rendering.
+- `scripts/collect_lqr_dataset.py`: collects LQR trajectory data, pseudo-sensor measurements, and residual learning targets.
+- `scripts/inspect_model.py`: inspects MuJoCo model information.
+- `scripts/read_state.py`: reads basic robot state information.
+- `scripts/test_torque.py`: tests actuator behavior.
+
+Current priority:
+
+1. Generate stable LQR baseline datasets.
+2. Define dataset schema and supervised learning targets.
+3. Implement EKF-only estimator.
+4. Train MLP residual estimator.
+5. Add slip, slope, and disturbance conditions.
+6. Compare EKF-only and EKF–MLP hybrid estimation.
