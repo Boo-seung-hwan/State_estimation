@@ -5,31 +5,126 @@ import csv
 import math
 import sys
 from pathlib import Path
+from typing import Optional
 
 import mujoco
 import numpy as np
 
 
-# Repo root:
+# Expected location when executed from this repository:
 # balance-robot-mujoco-sim/
 #   scripts/run_headless_lqr.py
 #   src/simulation/scene.xml
 #   src/simulation/robot_lqr.py
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SIM_DIR = REPO_ROOT / "src" / "simulation"
+SIM_DIR = REPO_ROOT / "simulation"
 MODEL_PATH = SIM_DIR / "scene.xml"
 
 sys.path.insert(0, str(SIM_DIR))
+import sys as _sys
+import pathlib as _pathlib
+
+_REPO_ROOT = _pathlib.Path(__file__).resolve().parents[1]
+_SIM_DIR = _REPO_ROOT / "src" / "simulation"
+
+if str(_SIM_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SIM_DIR))
+
 from robot_lqr import RobotLqr  # noqa: E402
 
 
-def quat_wxyz_from_x_angle(angle_rad: float) -> np.ndarray:
+ROBOT_BODY_NAME = "robot_body"
+FLOOR_GEOM_NAME = "floor"
+LEFT_WHEEL_BODY_NAME = "l_wheel"
+RIGHT_WHEEL_BODY_NAME = "r_wheel"
+LEFT_WHEEL_GEOM_NAME = "l_wheel_geom"
+RIGHT_WHEEL_GEOM_NAME = "r_wheel_geom"
+
+
+_AXIS_TO_VECTOR = {
+    "x": np.array([1.0, 0.0, 0.0], dtype=float),
+    "y": np.array([0.0, 1.0, 0.0], dtype=float),
+    "z": np.array([0.0, 0.0, 1.0], dtype=float),
+}
+
+
+def _name_to_id(model: mujoco.MjModel, obj_type: mujoco.mjtObj, name: str) -> int:
+    obj_id = mujoco.mj_name2id(model, obj_type, name)
+    if obj_id < 0:
+        raise ValueError(f"MuJoCo object not found: {name!r}")
+    return obj_id
+
+
+def quat_wxyz_from_axis_angle(axis_name: str, angle_rad: float) -> np.ndarray:
     """
-    MuJoCo free joint quaternion order is [w, x, y, z].
-    In this robot code, rotation about x-axis is treated as pitch.
+    Return a MuJoCo free-joint quaternion in [w, x, y, z] order.
+
+    The CAD/URDF-derived model uses wheel hinge axes along +/-Y, so the physically
+    correct forward/backward pitch axis may be y. However, the current RobotLqr
+    may still read x-axis pitch. Keep this selectable with --initial-pitch-axis.
     """
+    axis = _AXIS_TO_VECTOR[axis_name]
     half = 0.5 * angle_rad
-    return np.array([math.cos(half), math.sin(half), 0.0, 0.0], dtype=float)
+    return np.array(
+        [math.cos(half), *(math.sin(half) * axis)],
+        dtype=float,
+    )
+
+
+def get_floor_z(model: mujoco.MjModel, floor_z_arg: Optional[float]) -> float:
+    """Infer the floor plane z-position unless the user explicitly gives one."""
+    if floor_z_arg is not None:
+        return float(floor_z_arg)
+
+    floor_gid = _name_to_id(model, mujoco.mjtObj.mjOBJ_GEOM, FLOOR_GEOM_NAME)
+    return float(model.geom_pos[floor_gid][2])
+
+
+def get_wheel_radius(model: mujoco.MjModel) -> float:
+    """Use the collision cylinder radius from the left/right wheel geoms."""
+    l_gid = _name_to_id(model, mujoco.mjtObj.mjOBJ_GEOM, LEFT_WHEEL_GEOM_NAME)
+    r_gid = _name_to_id(model, mujoco.mjtObj.mjOBJ_GEOM, RIGHT_WHEEL_GEOM_NAME)
+    l_radius = float(model.geom_size[l_gid][0])
+    r_radius = float(model.geom_size[r_gid][0])
+    if not math.isclose(l_radius, r_radius, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(
+            f"Left/right wheel radii differ: {l_radius:.9f} vs {r_radius:.9f}"
+        )
+    return l_radius
+
+
+def infer_body_z_for_wheel_contact(
+    model: mujoco.MjModel,
+    floor_z: float,
+    ground_clearance: float,
+) -> float:
+    """
+    Compute free-joint body z so the wheel cylinders start at floor contact.
+
+    Formula for the current CAD model:
+        body_z = floor_z + wheel_radius - wheel_local_z + clearance
+
+    where wheel_local_z is the wheel body's local z-offset from robot_body plus
+    the wheel collision geom's local z-offset inside the wheel body.
+    """
+    l_bid = _name_to_id(model, mujoco.mjtObj.mjOBJ_BODY, LEFT_WHEEL_BODY_NAME)
+    r_bid = _name_to_id(model, mujoco.mjtObj.mjOBJ_BODY, RIGHT_WHEEL_BODY_NAME)
+    l_gid = _name_to_id(model, mujoco.mjtObj.mjOBJ_GEOM, LEFT_WHEEL_GEOM_NAME)
+    r_gid = _name_to_id(model, mujoco.mjtObj.mjOBJ_GEOM, RIGHT_WHEEL_GEOM_NAME)
+
+    l_local_z = float(model.body_pos[l_bid][2] + model.geom_pos[l_gid][2])
+    r_local_z = float(model.body_pos[r_bid][2] + model.geom_pos[r_gid][2])
+    wheel_local_z = 0.5 * (l_local_z + r_local_z)
+    wheel_radius = get_wheel_radius(model)
+
+    return float(floor_z + wheel_radius - wheel_local_z + ground_clearance)
+
+
+def reset_filters_and_commands(robot: RobotLqr) -> None:
+    robot.velocity_linear_set_point = 0.0
+    robot.yaw = 0.0
+    robot.pitch_dot_filtered = 0.0
+    robot.velocity_angular_filtered = 0.0
 
 
 def set_initial_pose(
@@ -37,14 +132,9 @@ def set_initial_pose(
     data: mujoco.MjData,
     body_z: float,
     initial_pitch_deg: float,
+    initial_pitch_axis: str,
 ) -> None:
-    """
-    Set the robot near wheel-ground contact and give it a small initial pitch.
-
-    scene.xml puts the floor plane at z = -0.1.
-    In robot-02.xml, the wheel center is at body z + 0.034 and wheel radius is 0.034,
-    so body_z = -0.1 places the wheel bottom at the floor plane.
-    """
+    """Set free-joint pose and wheel joint positions for the headless test."""
     mujoco.mj_resetData(model, data)
 
     data.qpos[:] = 0.0
@@ -58,9 +148,10 @@ def set_initial_pose(
 
     # Free joint orientation quaternion: [w, x, y, z]
     pitch_rad = math.radians(initial_pitch_deg)
-    data.qpos[3:7] = quat_wxyz_from_x_angle(pitch_rad)
+    data.qpos[3:7] = quat_wxyz_from_axis_angle(initial_pitch_axis, pitch_rad)
 
-    # Wheel joint positions
+    # Wheel joint positions. The current model has two wheel hinge joints after
+    # the free joint, so these are qpos[7] and qpos[8].
     data.qpos[7] = 0.0
     data.qpos[8] = 0.0
 
@@ -90,6 +181,15 @@ def get_snapshot(robot: RobotLqr, data: mujoco.MjData) -> dict:
     }
 
 
+def print_contact_summary(model: mujoco.MjModel, data: mujoco.MjData, label: str) -> None:
+    print(f"{label} contacts : {data.ncon}")
+    for i in range(data.ncon):
+        c = data.contact[i]
+        g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, c.geom1)
+        g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, c.geom2)
+        print(f"  {i}: {g1} <-> {g2} | dist={c.dist:+.6e}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Headless MuJoCo LQR simulation for the two-wheel balancing robot."
@@ -100,9 +200,48 @@ def main() -> None:
     parser.add_argument("--log-hz", type=float, default=100.0, help="CSV logging rate [Hz]")
     parser.add_argument("--speed", type=float, default=0.0, help="Target linear velocity [m/s]")
     parser.add_argument("--yaw", type=float, default=0.0, help="Yaw command added to wheel commands")
-    parser.add_argument("--initial-pitch-deg", type=float, default=5.0, help="Initial x-axis pitch [deg]")
-    parser.add_argument("--body-z", type=float, default=-0.1, help="Initial free-joint body z position")
+    parser.add_argument(
+        "--initial-pitch-deg",
+        type=float,
+        default=5.0,
+        help="Initial pitch perturbation [deg]",
+    )
+    parser.add_argument(
+        "--initial-pitch-axis",
+        choices=("x", "y", "z"),
+        default="y",
+        help=(
+            "Axis used to apply initial pitch. For the CAD/URDF-derived model, "
+            "forward/backward pitch is usually about the y-axis."
+        ),
+    )
+    parser.add_argument(
+        "--body-z",
+        type=float,
+        default=None,
+        help=(
+            "Initial free-joint body z position. If omitted, it is inferred from "
+            "floor height, wheel radius, and wheel local z-offset."
+        ),
+    )
+    parser.add_argument(
+        "--floor-z",
+        type=float,
+        default=None,
+        help="Floor z-position. If omitted, infer from geom named 'floor'.",
+    )
+    parser.add_argument(
+        "--ground-clearance",
+        type=float,
+        default=0.0,
+        help="Extra initial clearance above wheel-ground contact [m].",
+    )
     parser.add_argument("--fall-pitch-deg", type=float, default=60.0, help="Stop if abs(pitch) exceeds this [deg]")
+    parser.add_argument(
+        "--print-initial-contacts",
+        action="store_true",
+        help="Print contacts immediately after initialization.",
+    )
     parser.add_argument(
         "--log-csv",
         type=str,
@@ -117,23 +256,45 @@ def main() -> None:
     model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
     data = mujoco.MjData(model)
 
+    floor_z = get_floor_z(model, args.floor_z)
+    wheel_radius = get_wheel_radius(model)
+    body_z = (
+        float(args.body_z)
+        if args.body_z is not None
+        else infer_body_z_for_wheel_contact(
+            model=model,
+            floor_z=floor_z,
+            ground_clearance=args.ground_clearance,
+        )
+    )
+
     robot = RobotLqr(model, data)
 
     # Do not call robot.reset() here.
-    # The original reset uses scipy Rotation.as_quat(), whose order is [x, y, z, w],
-    # while MuJoCo qpos expects [w, x, y, z].
-    # We explicitly initialize qpos[3:7] in MuJoCo's [w, x, y, z] order instead.
+    # scipy Rotation.as_quat() returns [x, y, z, w], while MuJoCo free-joint qpos
+    # expects [w, x, y, z]. We explicitly initialize qpos[3:7] in MuJoCo order.
     set_initial_pose(
         model=model,
         data=data,
-        body_z=args.body_z,
+        body_z=body_z,
         initial_pitch_deg=args.initial_pitch_deg,
+        initial_pitch_axis=args.initial_pitch_axis,
     )
+    reset_filters_and_commands(robot)
 
-    robot.velocity_linear_set_point = 0.0
-    robot.yaw = 0.0
-    robot.pitch_dot_filtered = 0.0
-    robot.velocity_angular_filtered = 0.0
+    initial_snapshot = get_snapshot(robot, data)
+    if abs(initial_snapshot["pitch_deg"] - args.initial_pitch_deg) > 1.0:
+        print(
+            "[WARN] RobotLqr.get_pitch() does not match the requested initial pitch.\n"
+            f"       requested={args.initial_pitch_deg:+.3f} deg about {args.initial_pitch_axis}-axis, "
+            f"RobotLqr reads={initial_snapshot['pitch_deg']:+.3f} deg.\n"
+            "       This usually means RobotLqr is reading a different pitch axis."
+        )
+        print()
+
+    if args.print_initial_contacts:
+        print_contact_summary(model, data, "initial")
+        print()
 
     dt = float(model.opt.timestep)
     total_steps = int(args.duration / dt)
@@ -148,7 +309,11 @@ def main() -> None:
     print(f"duration        : {args.duration:.3f} s")
     print(f"total steps     : {total_steps}")
     print(f"control rate    : {args.control_hz:.1f} Hz, every {control_steps} sim steps")
-    print(f"initial pitch   : {args.initial_pitch_deg:.3f} deg")
+    print(f"floor z         : {floor_z:+.4f} m")
+    print(f"wheel radius    : {wheel_radius:.4f} m")
+    print(f"initial body z  : {body_z:+.4f} m")
+    print(f"initial pitch   : {args.initial_pitch_deg:.3f} deg about {args.initial_pitch_axis}-axis")
+    print(f"RobotLqr pitch  : {initial_snapshot['pitch_deg']:+.3f} deg")
     print(f"target speed    : {args.speed:.3f} m/s")
     print(f"yaw command     : {args.yaw:.3f}")
     print()

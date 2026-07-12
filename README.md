@@ -132,7 +132,6 @@ For research and dataset collection, headless MuJoCo scripts should be prioritiz
 ├── src/
 │   └── simulation/
 │       ├── scene.xml
-│       ├── robot-02.xml
 │       ├── robot_lqr.py
 │       ├── simulate_robot.py
 │       └── manual_actuator_gui.py
